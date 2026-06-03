@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: light;
+  }
+
+  body {
+    @apply bg-slate-100 text-ink antialiased;
+  }
+
+  input,
+  textarea {
+    @apply outline-none;
+  }
+}
