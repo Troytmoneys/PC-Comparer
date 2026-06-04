@@ -51,7 +51,7 @@ export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur lg:h-screen lg:border-b-0 lg:border-r">
+    <aside className="z-20 border-b border-slate-200 bg-white/95 backdrop-blur lg:sticky lg:top-0 lg:h-screen lg:border-b-0 lg:border-r">
       <div className="flex h-full flex-col gap-5 p-4 lg:p-5">
         <Link
           href="/"

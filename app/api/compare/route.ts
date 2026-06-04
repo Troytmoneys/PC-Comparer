@@ -9,6 +9,28 @@ export const runtime = "nodejs";
 type CompareRequest = {
   machines?: string[];
   workload?: string;
+  discountProfile?: {
+    student?: boolean;
+    military?: boolean;
+    educator?: boolean;
+    healthcare?: boolean;
+    openBox?: boolean;
+    refurbished?: boolean;
+    preferredRetailers?: string;
+  };
+  mlContext?: {
+    winner?: string;
+    winnerScore?: number;
+    confidence?: number;
+    consensus?: number;
+    archetype?: string;
+    ranking?: Array<{
+      machine: string;
+      score: number;
+      confidence: number;
+    }>;
+    strongestSignals?: string[];
+  };
 };
 
 type CompareResponse = {
@@ -52,6 +74,15 @@ export async function POST(request: Request) {
     const comparisonDimensions = featureBlueprint
       .map((feature) => `${feature.category}: ${feature.title}`)
       .join("\n");
+    const discountProfile = body.discountProfile
+      ? Object.entries(body.discountProfile)
+          .filter(([, value]) => Boolean(value))
+          .map(([key, value]) => `${key}: ${String(value)}`)
+          .join(", ")
+      : "Public discounts only";
+    const mlContext = body.mlContext
+      ? JSON.stringify(body.mlContext, null, 2)
+      : "No local ML recommendation supplied.";
 
     const prompt = `
 You are a hardware comparison analyst. Use Google Search grounding to verify current specs.
@@ -61,6 +92,12 @@ Today is ${new Date().toLocaleDateString("en-US", {
       dateStyle: "long",
       timeZone: "America/Chicago",
     })}. The buyer is in the United States.
+Laptop savings profile: ${discountProfile}.
+
+The local explainable ML ensemble produced this recommendation context:
+${mlContext}
+
+Use live search to audit the ML conclusion. Explicitly say when current facts confirm it, weaken it, or overturn it. Do not accept the ML winner blindly.
 
 This app has ${comparisonDimensionCount} local comparison dimensions. Use the list below as the audit checklist and call out the dimensions that materially change the buying decision:
 ${comparisonDimensions}
@@ -71,6 +108,8 @@ Evaluate:
 - Upgradeability paths: RAM soldered vs SODIMM/DIMM, storage slots, CPU socket, GPU path.
 - Practical risks: firmware, Wi-Fi chipset, thermals, fan noise, warranty constraints.
 - Current discounts, sale price credibility, coupon/public discount opportunities, stock condition, and whether a deal looks meaningfully better than normal pricing.
+- For laptops, actively search official manufacturer programs and major retailer offers that match the savings profile. Never claim an eligibility discount unless the user profile says they qualify.
+- Explain how to apply each verified public coupon or eligible discount at checkout, but do not invent codes or imply that checkout was completed.
 
 Return strict JSON only:
 {

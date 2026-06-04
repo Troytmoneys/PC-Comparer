@@ -12,6 +12,20 @@ export type ComparisonVerdict = {
   note: string;
 };
 
+export type DecisionPriority =
+  | "performance"
+  | "upgradeability"
+  | "compatibility"
+  | "display"
+  | "value"
+  | "portability";
+
+export type DecisionWeights = Record<DecisionPriority, number>;
+
+export type DecisionBreakdown = Record<DecisionPriority, number> & {
+  total: number;
+};
+
 export const comparisonCategories = [
   "All",
   ...Array.from(new Set(featureBlueprint.map((feature) => feature.category))),
@@ -43,6 +57,39 @@ export function getMachineAtlasScore(machine: MachineProfile) {
   );
 
   return Math.round(total / featureBlueprint.length);
+}
+
+export function getMachineDecisionBreakdown(
+  machine: MachineProfile,
+  weights: DecisionWeights,
+): DecisionBreakdown {
+  const scores: Record<DecisionPriority, number> = {
+    performance: performanceScore(machine, "performance"),
+    upgradeability: Math.round(
+      ["ram", "m.2 storage", "cpu socket", "gpu upgrade"].reduce(
+        (sum, title) => sum + hardwareScore(machine, title),
+        0,
+      ) / 4,
+    ),
+    compatibility: osScore(machine, "compatibility"),
+    display: hardwareScore(machine, "display hdmi usb4"),
+    value: dealScore(machine, "price discount budget"),
+    portability:
+      machine.class === "Laptop"
+        ? Math.round((82 + machine.benchmarks.fanNoise) / 2)
+        : machine.class === "Mini PC"
+          ? 72
+          : 34,
+  };
+  const weightTotal = Object.values(weights).reduce((sum, value) => sum + value, 0) || 1;
+  const total = Math.round(
+    (Object.keys(scores) as DecisionPriority[]).reduce(
+      (sum, priority) => sum + scores[priority] * weights[priority],
+      0,
+    ) / weightTotal,
+  );
+
+  return { ...scores, total };
 }
 
 export function filterComparisonFeatures(

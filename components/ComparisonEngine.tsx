@@ -1,13 +1,19 @@
 "use client";
 
 import {
+  BadgePercent,
   BarChart3,
   Check,
   Cpu,
   Download,
+  GraduationCap,
+  Laptop,
   Loader2,
   Monitor,
+  RotateCcw,
   Search,
+  ShieldCheck,
+  Sparkles,
   Tags,
   Trophy,
   Wrench,
@@ -16,15 +22,21 @@ import { useMemo, useState } from "react";
 
 import {
   type ComparisonCategoryFilter,
+  type DecisionPriority,
+  type DecisionWeights,
   comparisonCategories,
   comparisonDimensionCount,
   filterComparisonFeatures,
   getFeatureVerdict,
   getMachineAtlasScore,
+  getMachineDecisionBreakdown,
 } from "@/data/comparisonAtlas";
 import { seedMachines } from "@/data/machines";
+import { runMlRecommendation } from "@/lib/ml/recommendationEngine";
 import { cn } from "@/lib/utils";
 import type { MachineProfile } from "@/types/pc";
+
+import { MachineLearningLab } from "./MachineLearningLab";
 
 type AiComparison = {
   verdict: string;
@@ -62,12 +74,51 @@ const rows = [
   { key: "performance", label: "Performance", icon: BarChart3 },
 ] as const;
 
+const priorityLabels: Record<DecisionPriority, string> = {
+  performance: "Performance",
+  upgradeability: "Upgradeability",
+  compatibility: "OS compatibility",
+  display: "External displays",
+  value: "Value & discounts",
+  portability: "Portability",
+};
+
+const defaultWeights: DecisionWeights = {
+  performance: 85,
+  upgradeability: 70,
+  compatibility: 80,
+  display: 65,
+  value: 90,
+  portability: 60,
+};
+
+const savingsOptions = [
+  ["student", "Student", GraduationCap],
+  ["military", "Military / veteran", ShieldCheck],
+  ["educator", "Educator", GraduationCap],
+  ["healthcare", "Healthcare worker", ShieldCheck],
+  ["openBox", "Open-box offers", BadgePercent],
+  ["refurbished", "Refurbished offers", Wrench],
+] as const;
+
 export function ComparisonEngine() {
   const [selected, setSelected] = useState(seedMachines.map((machine) => machine.id));
   const [workload, setWorkload] = useState("React development, Docker, 45-inch ultrawide");
+  const [machineView, setMachineView] = useState<"All" | "Laptops" | "Desktop">("All");
+  const [weights, setWeights] = useState<DecisionWeights>(defaultWeights);
+  const [discountProfile, setDiscountProfile] = useState({
+    student: false,
+    military: false,
+    educator: false,
+    healthcare: false,
+    openBox: true,
+    refurbished: true,
+    preferredRetailers: "Best Buy, Lenovo, Dell, HP, Framework, Newegg, Amazon",
+  });
   const [atlasCategory, setAtlasCategory] =
     useState<ComparisonCategoryFilter>("All");
   const [atlasQuery, setAtlasQuery] = useState("");
+  const [atlasLimit, setAtlasLimit] = useState(30);
   const [aiState, setAiState] = useState<
     | { status: "idle" }
     | { status: "loading" }
@@ -80,9 +131,45 @@ export function ComparisonEngine() {
     [selected],
   );
 
+  const visibleMachineChoices = useMemo(
+    () =>
+      seedMachines.filter((machine) => {
+        if (machineView === "Laptops") return machine.class === "Laptop";
+        if (machineView === "Desktop") return machine.class !== "Laptop";
+        return true;
+      }),
+    [machineView],
+  );
+
+  const rankedMachines = useMemo(
+    () =>
+      machines
+        .map((machine) => ({
+          machine,
+          breakdown: getMachineDecisionBreakdown(machine, weights),
+        }))
+        .sort((a, b) => b.breakdown.total - a.breakdown.total),
+    [machines, weights],
+  );
+
+  const autoMlRecommendation = useMemo(
+    () =>
+      runMlRecommendation({
+        machines,
+        workload,
+        decisionWeights: weights,
+      }),
+    [machines, weights, workload],
+  );
+
   const visibleFeatures = useMemo(
     () => filterComparisonFeatures(atlasCategory, atlasQuery),
     [atlasCategory, atlasQuery],
+  );
+
+  const displayedFeatures = useMemo(
+    () => visibleFeatures.slice(0, atlasLimit),
+    [atlasLimit, visibleFeatures],
   );
 
   const atlasCsv = useMemo(
@@ -122,6 +209,22 @@ export function ComparisonEngine() {
         body: JSON.stringify({
           machines: machines.map((machine) => machine.name),
           workload,
+          discountProfile,
+          mlContext: {
+            winner: autoMlRecommendation.winner.machine.name,
+            winnerScore: autoMlRecommendation.winner.ensembleScore,
+            confidence: autoMlRecommendation.winner.confidence,
+            consensus: autoMlRecommendation.consensus,
+            archetype: autoMlRecommendation.archetype,
+            ranking: autoMlRecommendation.predictions.map((prediction) => ({
+              machine: prediction.machine.name,
+              score: prediction.ensembleScore,
+              confidence: prediction.confidence,
+            })),
+            strongestSignals: autoMlRecommendation.winner.strongestSignals.map(
+              (signal) => signal.label,
+            ),
+          },
         }),
       });
       const payload = (await response.json()) as AiComparison & { error?: string };
@@ -140,7 +243,7 @@ export function ComparisonEngine() {
   }
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-panel sm:p-6">
+    <section className="min-w-0 max-w-full overflow-hidden rounded-lg border border-slate-200 bg-white p-5 shadow-panel sm:p-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs font-black uppercase tracking-wide text-ember">
@@ -157,8 +260,43 @@ export function ComparisonEngine() {
         <Cpu className="h-8 w-8 text-sage" aria-hidden="true" />
       </div>
 
-      <div className="mt-6 flex flex-wrap gap-2">
-        {seedMachines.map((machine) => (
+      <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="inline-flex w-fit rounded-md border border-slate-200 bg-slate-100 p-1">
+          {(["All", "Laptops", "Desktop"] as const).map((view) => (
+            <button
+              className={cn(
+                "min-h-9 rounded px-3 text-sm font-black transition",
+                machineView === view
+                  ? "bg-white text-slate-950 shadow-sm"
+                  : "text-slate-500 hover:text-slate-950",
+              )}
+              key={view}
+              onClick={() => setMachineView(view)}
+              type="button"
+            >
+              {view}
+            </button>
+          ))}
+        </div>
+        <button
+          className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-sage bg-teal-50 px-3 text-sm font-black text-sage transition hover:bg-teal-100"
+          onClick={() => {
+            setMachineView("Laptops");
+            setSelected(
+              seedMachines
+                .filter((machine) => machine.class === "Laptop")
+                .map((machine) => machine.id),
+            );
+          }}
+          type="button"
+        >
+          <Laptop className="h-4 w-4" aria-hidden="true" />
+          Laptop showdown
+        </button>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {visibleMachineChoices.map((machine) => (
           <button
             className={cn(
               "grid min-h-16 gap-1 rounded-lg border px-3 py-2 text-left transition",
@@ -182,6 +320,109 @@ export function ComparisonEngine() {
             <strong className="text-sm text-slate-950">{machine.name}</strong>
           </button>
         ))}
+      </div>
+
+      <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(320px,0.8fr)_minmax(0,1.2fr)]">
+        <section className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-black uppercase tracking-wide text-ember">
+                Decision Weights
+              </p>
+              <h3 className="mt-1 text-lg font-black text-slate-950">
+                Make the winner match your priorities
+              </h3>
+            </div>
+            <button
+              className="grid h-10 w-10 place-items-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:text-slate-950"
+              onClick={() => setWeights(defaultWeights)}
+              title="Reset decision weights"
+              type="button"
+            >
+              <RotateCcw className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </div>
+          <div className="mt-4 grid gap-3">
+            {(Object.keys(priorityLabels) as DecisionPriority[]).map((priority) => (
+              <label
+                className="grid grid-cols-[132px_minmax(80px,1fr)_34px] items-center gap-3 text-sm"
+                key={priority}
+              >
+                <span className="font-bold text-slate-600">
+                  {priorityLabels[priority]}
+                </span>
+                <input
+                  className="accent-teal-700"
+                  max="100"
+                  min="0"
+                  onChange={(event) =>
+                    setWeights((current) => ({
+                      ...current,
+                      [priority]: Number(event.target.value),
+                    }))
+                  }
+                  type="range"
+                  value={weights[priority]}
+                />
+                <strong className="text-right text-slate-950">
+                  {weights[priority]}
+                </strong>
+              </label>
+            ))}
+          </div>
+        </section>
+
+        <section className="rounded-lg border border-slate-200 bg-white p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-black uppercase tracking-wide text-ember">
+                Ranked Decision
+              </p>
+              <h3 className="mt-1 text-lg font-black text-slate-950">
+                Live weighted winner
+              </h3>
+            </div>
+            <Sparkles className="h-5 w-5 text-sage" aria-hidden="true" />
+          </div>
+          <div className="mt-4 grid gap-2">
+            {rankedMachines.map(({ machine, breakdown }, index) => (
+              <article
+                className={cn(
+                  "grid gap-3 rounded-md border p-3 sm:grid-cols-[36px_minmax(180px,1fr)_minmax(180px,1fr)_48px] sm:items-center",
+                  index === 0
+                    ? "border-sage bg-teal-50"
+                    : "border-slate-200 bg-slate-50",
+                )}
+                key={`ranked-${machine.id}`}
+              >
+                <span className="grid h-8 w-8 place-items-center rounded-md bg-white text-sm font-black text-sage">
+                  #{index + 1}
+                </span>
+                <div>
+                  <strong className="text-sm text-slate-950">{machine.name}</strong>
+                  <span className="mt-1 block text-xs font-bold text-slate-500">
+                    {machine.class} | ${machine.price.toLocaleString()} baseline
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-1 text-center text-xs">
+                  {(["performance", "value", "upgradeability"] as DecisionPriority[]).map(
+                    (priority) => (
+                      <span
+                        className="rounded bg-white px-1 py-1 font-bold text-slate-600"
+                        key={`${machine.id}-${priority}`}
+                      >
+                        {priority.slice(0, 4)} {breakdown[priority]}
+                      </span>
+                    ),
+                  )}
+                </div>
+                <strong className="text-right text-2xl text-sage">
+                  {breakdown.total}
+                </strong>
+              </article>
+            ))}
+          </div>
+        </section>
       </div>
 
       <div className="mt-5 grid gap-3 md:grid-cols-3">
@@ -214,6 +455,72 @@ export function ComparisonEngine() {
         ))}
       </div>
 
+      <div className="mt-5">
+        <MachineLearningLab machines={machines} workload={workload} weights={weights} />
+      </div>
+
+      <section className="mt-5 rounded-lg border border-blue-200 bg-blue-50 p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <BadgePercent className="h-5 w-5 text-cobalt" aria-hidden="true" />
+              <p className="text-xs font-black uppercase tracking-wide text-cobalt">
+                Laptop Coupon & Discount Hunter
+              </p>
+            </div>
+            <h3 className="mt-2 text-lg font-black text-slate-950">
+              Search only for savings you can actually use
+            </h3>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">
+              Gemini checks official programs, retailer coupons, open-box and
+              refurbished inventory, bundles, and price-match opportunities for
+              the selected laptops.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 rounded-md bg-white px-3 py-2 text-xs font-black text-slate-600">
+            <ShieldCheck className="h-4 w-4 text-sage" aria-hidden="true" />
+            Eligibility is used only in this request
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {savingsOptions.map(([key, label, Icon]) => (
+            <label
+              className="flex min-h-11 items-center gap-3 rounded-md border border-blue-200 bg-white px-3 text-sm font-bold text-slate-700"
+              key={key}
+            >
+              <input
+                checked={discountProfile[key]}
+                className="h-4 w-4 accent-teal-700"
+                onChange={(event) =>
+                  setDiscountProfile((current) => ({
+                    ...current,
+                    [key]: event.target.checked,
+                  }))
+                }
+                type="checkbox"
+              />
+              <Icon className="h-4 w-4 text-cobalt" aria-hidden="true" />
+              {label}
+            </label>
+          ))}
+        </div>
+
+        <label className="mt-3 grid gap-2 text-sm font-bold text-slate-600">
+          Preferred retailers
+          <input
+            className="min-h-11 rounded-md border border-blue-200 bg-white px-3 text-slate-950 focus:border-cobalt focus:ring-4 focus:ring-blue-100"
+            onChange={(event) =>
+              setDiscountProfile((current) => ({
+                ...current,
+                preferredRetailers: event.target.value,
+              }))
+            }
+            value={discountProfile.preferredRetailers}
+          />
+        </label>
+      </section>
+
       <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(240px,1fr)_auto] lg:items-end">
         <label className="grid gap-2 text-sm font-bold text-slate-600">
           Deep-dive workload
@@ -231,9 +538,9 @@ export function ComparisonEngine() {
           {aiState.status === "loading" ? (
             <Loader2 className="h-5 w-5 animate-spin" />
           ) : (
-            <BarChart3 className="h-5 w-5" />
+            <BadgePercent className="h-5 w-5" />
           )}
-          AI deep dive
+          Find coupons + compare
         </button>
       </div>
 
@@ -316,7 +623,10 @@ export function ComparisonEngine() {
                     : "border-slate-200 bg-slate-100 text-slate-600 hover:bg-white",
                 )}
                 key={category}
-                onClick={() => setAtlasCategory(category)}
+                onClick={() => {
+                  setAtlasCategory(category);
+                  setAtlasLimit(30);
+                }}
                 type="button"
               >
                 {category}
@@ -332,11 +642,19 @@ export function ComparisonEngine() {
             <input
               className="min-h-11 w-full rounded-md border border-slate-300 bg-white px-10 text-sm text-slate-950 focus:border-sage focus:ring-4 focus:ring-teal-100"
               value={atlasQuery}
-              onChange={(event) => setAtlasQuery(event.target.value)}
+              onChange={(event) => {
+                setAtlasQuery(event.target.value);
+                setAtlasLimit(30);
+              }}
               placeholder="Search 285 dimensions"
             />
           </label>
         </div>
+
+        <p className="mt-3 text-sm font-bold text-slate-500">
+          Showing {Math.min(displayedFeatures.length, visibleFeatures.length)} of{" "}
+          {visibleFeatures.length} matching dimensions
+        </p>
 
         <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white">
           <div
@@ -368,7 +686,7 @@ export function ComparisonEngine() {
               ))}
             </div>
 
-            {visibleFeatures.map((feature) => (
+            {displayedFeatures.map((feature) => (
               <div
                 className="grid border-b border-slate-200 last:border-b-0"
                 style={{
@@ -419,6 +737,15 @@ export function ComparisonEngine() {
             ))}
           </div>
         </div>
+        {displayedFeatures.length < visibleFeatures.length && (
+          <button
+            className="mt-4 inline-flex min-h-11 items-center justify-center rounded-md border border-sage bg-white px-4 text-sm font-black text-sage transition hover:bg-teal-50"
+            onClick={() => setAtlasLimit((current) => current + 30)}
+            type="button"
+          >
+            Show 30 more dimensions
+          </button>
+        )}
       </div>
 
       {aiState.status === "error" && (

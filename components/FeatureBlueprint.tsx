@@ -47,7 +47,7 @@ export function FeatureBlueprint({
   );
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-panel sm:p-6">
+    <section className="min-w-0 max-w-full overflow-hidden rounded-lg border border-slate-200 bg-white p-5 shadow-panel sm:p-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs font-black uppercase tracking-wide text-ember">
